@@ -1,5 +1,5 @@
 [versions]
-jetbrains-annotations = "24.1.0"
+jetbrains-annotations = "26.1.0"
 apache-hop = "2.10.+"
 intellij-idea = "2025.2.6.2"
 
