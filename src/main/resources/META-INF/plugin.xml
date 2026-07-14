@@ -1,19 +1,36 @@
-<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.yasuoz.hopmigrationassistant</id>
-    <name>hop-migration-assistant</name>
-    <vendor>yasuoz</vendor>
-    <description><![CDATA[
-        <p><b>hop-migration-assistant</b> is a repository that provides a pure template to make it easier to create a new plugin project.</p>
-        <p>The main goal of this template is to speed up the setup phase of plugin development for both new and experienced developers by preconfiguring the project scaffold and CI, linking to the proper documentation pages, and keeping everything organized.</p>
-    ]]></description>
+	<id>jp.ac.nitech.cc.hop.assistant</id>
+	<name>Hop Migration Assistant</name>
+	<vendor>yasuoz</vendor>
+	<description><![CDATA[
+		<p>This tool assists in modifying plugins developed for Pentaho to make them compatible with Apache Hop.</p>
+	]]></description>
 
-    <depends>com.intellij.modules.platform</depends>
+	<depends>com.intellij.modules.platform</depends>
+	<depends>com.intellij.modules.java</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
-    <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.yasuoz.hopmigrationassistant.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.yasuoz.hopmigrationassistant.startup.MyProjectActivity" />
-    </extensions>
+	<extensions defaultExtensionNs="com.intellij">
+		<localInspection
+				bundle="messages.I18n"
+				enabledByDefault="true"
+				groupPath="Java"
+				groupName="Migration"
+				implementationClass="jp.ac.nitech.cc.hop.assistant.imports.HopImportInspection"
+				key="quickfix.hop.import.migration.name"
+				language="JAVA"
+				level="ERROR"
+				shortName="HopImportMigration"/>
+		<localInspection
+				bundle="messages.I18n"
+				enabledByDefault="true"
+				groupName="Apache Hop"
+				implementationClass="jp.ac.nitech.cc.hop.assistant.constructor.HopConstructorInspection"
+				key="inspection.hop.constructor.display.name"
+				language="JAVA"
+				level="ERROR"
+				shortName="HopConstructor"/>
+		<implicitUsageProvider implementation="jp.ac.nitech.cc.hop.assistant.HopImplicitUsageProvider"/>
+		<projectService serviceImplementation="jp.ac.nitech.cc.hop.assistant.service.HopProjectSettingsService"/>
+		<backgroundPostStartupActivity implementation="jp.ac.nitech.cc.hop.assistant.service.HopLibraryCheckActivity"/>
+	</extensions>
 </idea-plugin>
