@@ -9,20 +9,30 @@ import jp.ac.nitech.cc.hop.assistant.Fixer;
 import jp.ac.nitech.cc.hop.assistant.I18n;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.List;
+
 import static com.intellij.psi.util.InheritanceUtil.isInheritor;
 import static jp.ac.nitech.cc.hop.assistant.imports.HopImportInspection.emptyHopLibrary;
 
 public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionTool {
-	public static final String DATA			= "Data";
-	public static final String DIALOG		= "Dialog";
-	/** IVariables */
-	public static final String I_VARIABLES	= "org.apache.hop.core.variables.IVariables";
-	public static final String META			= "Meta";
-	public static final String PIPELINE		= "org.apache.hop.pipeline.PipelineMeta";
-	public static final String PUBLIC		= "public";
-	public static final String SHELL		= "org.eclipse.swt.widgets.Shell";
-	public static final String WORKFLOW		= "org.apache.hop.workflow.WorkflowMeta";
+	public static final String	DATA			= "Data"
+		,						DIALOG			= "Dialog"
+		,						I_VARIABLES		= "org.apache.hop.core.variables.IVariables"
+		,						META			= "Meta"
+		,						PIPELINE		= "org.apache.hop.pipeline.Pipeline"
+		,						PIPELINE_META	= "org.apache.hop.pipeline.PipelineMeta"
+		,						PUBLIC			= "public"
+		,						SHELL			= "org.eclipse.swt.widgets.Shell"
+		,						TRANS_META		= "org.apache.hop.pipeline.transform.TransformMeta"
+		,						WORKFLOW_META	= "org.apache.hop.workflow.WorkflowMeta";
 
+	static final Expand			EX_INT			= new Expand(int.class.getCanonicalName(), null)
+			,					EX_PIPELINE		= new Expand(PIPELINE, null)
+			,					EX_PIPELINE_META= new Expand(PIPELINE_META, null)
+			,					EX_SHELL		= new Expand(SHELL, null)
+			,					EX_TRANS_META	= new Expand(TRANS_META, null)
+			,					EX_VARIABLES	= new Expand(I_VARIABLES, null)
+			,					EX_WORKFLOW		= new Expand(WORKFLOW_META, null);
 	/**
 	 * 1番目と2番目のジェネリックを確認します。
 	 * プリミティブチェックを優先し、無駄な配列アクセスやNullバグを鉄壁に防ぐJava実装です。
@@ -31,7 +41,7 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 			@NotNull final ProblemsHolder	holder,
 			@NotNull final PsiClass			aClass,
 			@NotNull final String			className,
-			@NotNull final Fixer base,
+			@NotNull final Fixer			base,
 			@NotNull final Fixer			first,
 			@NotNull final Fixer			second
 	) {
@@ -132,10 +142,10 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 	 * 引数は合っているが、コンストラクタがpublicでない場合は、{@param holder}を介して解決策を提案<br/>
 	 * falseが返った場合はコンストラクタを作成するクイックフィックスを提示してください
 	 */
-	private static boolean hasConstructor(
-			@NotNull final ProblemsHolder			holder,
-			@NotNull final PsiClass					aClass,
-			@NotNull final java.util.List<String>	expectedTypes
+	static boolean hasConstructor(
+			@NotNull final ProblemsHolder	holder,
+			@NotNull final PsiClass			aClass,
+			@NotNull final List<Expand>		expectedTypes
 	) {
 		final PsiMethod[]	constructors	= aClass.getConstructors();
 		final int			expectedSize	= expectedTypes.size();
@@ -150,8 +160,8 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 			// 引数の型チェック
 			for (int i = 0; i < expectedSize; i++) {
 				final String	currentParamType	= parameters[i].getType().getCanonicalText();
-				final String	expectedTypeName	= expectedTypes.get(i);
-				if (!currentParamType.equals(expectedTypeName)) {
+				final Expand	expectedType		= expectedTypes.get(i);
+				if (!currentParamType.equals(expectedType.fixed)) {
 					continue CONSTRUCTOR;	// このコンストラクタは不適合。内側を抜けて次のコンストラクタへ
 				}
 			}
@@ -172,7 +182,7 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 			return true;
 		}
 
-		// 引数なしコンストラクタを期待しており、かつコンストラクタが1つもない（デフォルトコンストラクタ動作）場合
+		// 引数なしコンストラクタを期待しており、かつコンストラクタが1つもない(デフォルトコンストラクタ動作の)場合
 		if (constructors.length == 0 && expectedSize == 0) {
 			if (!aClass.hasModifierProperty(PUBLIC)) {
 				final PsiModifierList classMList = aClass.getModifierList();
@@ -206,14 +216,14 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 
 		final PsiElement insertedElement;
 		if (fields.length > 0) {
-			// クラス内に書かれている「一番最後のフィールド(変数定義)」を取得します
-			// Kotlinの fields.last() を、配列のインデックス引き算（length - 1）で最速に置き換え
+			// クラス内に書かれている「一番最後のフィールド(変数定義)」を取得
+			// Kotlinの fields.last()を、配列のインデックス引き算(length - 1)で置き換え
 			final PsiField lastField = fields[fields.length - 1];
 
 			// その最後の変数の「直後」を狙って、新しく作ったコンストラクター(または変数)を挿入
 			insertedElement = psiClass.addAfter(newElement, lastField);
 		} else {
-			// もしクラス内に変数が1つも無ければ、クラスの開始波括弧「 { 」の直後に配置します
+			// もしクラス内に変数が1つも無ければ、クラスの開始波括弧「 { 」の直後に配置
 			final PsiElement leftBrace = psiClass.getLBrace();
 			if (leftBrace != null) {
 				insertedElement = psiClass.addAfter(newElement, leftBrace);
@@ -255,45 +265,21 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 
 				// --- 【Dialog】 ---
 				if (className.endsWith(DIALOG)) {
-					// 親クラスやインターフェースを辿って、どちらに属しているか判別
-					final boolean isAction = isInheritor(aClass, Fixer.ACTION_DIALOG.interfaceClass);
-					if (!isAction && !isInheritor(aClass, Fixer.TRANS_DIALOG.interfaceClass)) {
-						return;
-					}
-
-					// Kotlinの let ブロックを Java の高速な三項演算子とインデックス切り出しに変換
+					final ConstructorBase	actor;
 					// Action系なら末尾のDialogを取る、Transform系なら末尾をMetaに変える
-					final String	expectedName;
-					{
-						if (isAction) {
-							expectedName	= className.substring(0, className.length() - DIALOG.length());
-						} else {
-							expectedName	= new StringBuilder().append(className, 0, className.length() - DIALOG.length())
-									.append(META).toString();
-						}
-
-					}
-					// 各系統の引数リストを元にコンストラクターを確認
-					final java.util.List<String> expectedTypes = isAction
-							? java.util.List.of(SHELL, expectedName, WORKFLOW, I_VARIABLES)
-							: java.util.List.of(SHELL, I_VARIABLES, expectedName, PIPELINE);
-
-					if (hasConstructor(holder, aClass, expectedTypes)) {
-						return; // すでに正しいコンストラクタがある
-					}
-
-					// コンストラクタに不備がある、または存在しない場合はエラーを登録してQuickFixを提示
-					final PsiElement problemElement = (aClass.getNameIdentifier() != null) ? aClass.getNameIdentifier() : aClass;
-					holder.registerProblem(
-							problemElement,
-							I18n.message("inspection.hop.constructor.problem.descriptor"),
-							ProblemHighlightType.GENERIC_ERROR,
-							new QuickFixDialog(expectedName, isAction)
-					);
+					if (isInheritor(aClass, Fixer.ACTION_DIALOG.interfaceClass)) {
+						actor	= new ConstructorActionDialog(aClass,
+								className.substring(0, className.length() - DIALOG.length()));
+					} else if(isInheritor(aClass, Fixer.TRANS_DIALOG.interfaceClass)) {
+						actor	= new ConstructorTransDialog(aClass,
+								new StringBuilder().append(className, 0, className.length() - DIALOG.length())
+										.append(META).toString());
+					} else return;
+					actor.check(holder, aClass);
 				} else if (className.endsWith(DATA)) {
 					// --- 【Data】 ---
 					if (isInheritor(aClass, Fixer.TRANS_DATA.baseClass)
-							&& !hasConstructor(holder, aClass, java.util.List.of())) {
+							&& !hasConstructor(holder, aClass, List.of())) {
 
 						final PsiElement problemElement = (aClass.getNameIdentifier() != null) ? aClass.getNameIdentifier() : aClass;
 						holder.registerProblem(
@@ -306,9 +292,10 @@ public class HopConstructorInspection extends AbstractBaseJavaLocalInspectionToo
 				} else if (className.endsWith(META)) {
 					// --- 【Meta】SomeMeta<Some, SomeData> ---
 					checkGenerics(holder, aClass, className, Fixer.TRANS_META, Fixer.TRANS, Fixer.TRANS_DATA);
-				} else {
+				} else if(isInheritor(aClass, Fixer.TRANS.interfaceClass)) {
 					// --- 【Main】Some<SomeMeta, SomeData> ---
 					checkGenerics(holder, aClass, className, Fixer.TRANS, Fixer.TRANS_META, Fixer.TRANS_DATA);
+					new ConstructorTrans(aClass, className).check(holder, aClass);
 				}
 			}
 		};

@@ -9,6 +9,14 @@ intellijPlatform {
 	pluginConfiguration {
 		id = "jp.ac.nitech.cc.hop.migration"
 		name = "Hop Migration Assistant"
+		id.set(providers.gradleProperty("pluginId"))
+		name.set(providers.gradleProperty("pluginName"))
+		version.set(providers.gradleProperty("version"))
+		description.set(providers.gradleProperty("pluginDescription"))
+
+		vendor {
+			name.set(providers.gradleProperty("pluginVendor"))
+		}
 	}
 }
 dependencies {
@@ -32,16 +40,4 @@ tasks.named<Zip>("buildPlugin") {
 }
 tasks.named("runIde") {
 	group = "2-develop"
-}
-intellijPlatform {
-	pluginConfiguration {
-		id.set(providers.gradleProperty("pluginId"))
-		name.set(providers.gradleProperty("pluginName"))
-		version.set(providers.gradleProperty("version"))
-		description.set(providers.gradleProperty("pluginDescription"))
-
-		vendor {
-			name.set(providers.gradleProperty("pluginVendor"))
-		}
-	}
 }

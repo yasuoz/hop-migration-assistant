@@ -7,6 +7,11 @@ import static jp.ac.nitech.cc.hop.assistant.constructor.HopConstructorInspection
  * すべてのプロパティを不変（final）に指定し、高速かつ安全に管理します。
  */
 public enum Fixer {
+	ACTION(
+			"org.apache.hop.workflow.action.ActionBase",
+			"org.apache.hop.workflow.action.IAction",
+			null
+	),
 	ACTION_DIALOG(
 			"org.apache.hop.ui.workflow.action.ActionDialog",
 			"org.apache.hop.workflow.action.IActionDialog",

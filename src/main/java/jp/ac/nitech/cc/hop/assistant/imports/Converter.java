@@ -18,10 +18,10 @@ public class Converter {
 	 * JobEntry	→ Action<br/>
 	 */
 	private static final Pattern	HOP_MIGRATION_PATTERN	= Pattern.compile(
-			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho.di((?:\\.[_a-z0-9]+)+))?(?:(?:^|\\.)((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
+			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho.di((?:\\.[_a-z0-9]+)+))?(?:(?:^|([:.]))((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
 	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:entr(?:ies|y)|job|repository|shared|step|trans)(?=\\.|$)");
 	private final String			oldImport;
-	private final StringBuilder		newImport	= new StringBuilder();
+	private final StringBuilder		newImport;
 	/** 最後の.位置 */
 	private final int				oldStart, oldEnd, newStart, newEnd;
 	/** 構造が変わらず */
@@ -30,13 +30,20 @@ public class Converter {
 	public final boolean			renamed;
 	public final boolean			isStatic, isWildCard;
 	private String					oldName, newName;
-	public static @NotNull Converter from(final String oldImport) {
+	/** @param	oldImport	変換対象のimport文あるいは完全修飾子付きクラス名(パッケージ名とクラス名の間は.と:いずれでも良い)
+	 *  @param	start		{@param oldImport}の文字列の中でクラス名が始まるIndex
+	 *  @param	end			{@param oldImport}の文字列の中でクラス名が終わるIndex
+	 * */
+	public static @NotNull Converter from(final StringBuilder buf, final String oldImport, final int start, final int end) {
 		final Matcher	matcher;
 		if (oldImport != null) {
-			matcher	= HOP_MIGRATION_PATTERN.matcher(oldImport);
-			if (matcher.find()) return new Converter(oldImport, matcher);
+			matcher	= HOP_MIGRATION_PATTERN.matcher(oldImport).region(start, end);
+			if (matcher.find()) return new Converter(buf, oldImport, matcher);
 		}
 		return EMPTY;
+	}
+	public static @NotNull Converter from(final String oldImport) {
+		return from(new StringBuilder(), oldImport, 0, oldImport != null ? oldImport.length() : 0);
 	}
 	/** 変換対象外 */
 	private Converter() {
@@ -45,19 +52,22 @@ public class Converter {
 		oldEnd		= -1;
 		newStart	= -1;
 		newEnd		= -1;
+		newImport	= null;
 		isStatic	= false;
 		isWildCard	= false;
 		stay		= true;
 		renamed		= false;
 	}
-	/** import, 完全修飾クラス名 */
-	private Converter(final String oldImport, final Matcher matcher) {
+	/** import, 完全修飾クラス名の変換
+	 * {@link #newImport}は変換後に追記してもよいが、短くしてはならない */
+	private Converter(final StringBuilder buf, final String oldImport, final Matcher matcher) {
 		this.oldImport	= oldImport;
+		newImport		= buf != null ? buf : new StringBuilder();
 		isStatic		= matcher.start(2) >= 0;
-		isWildCard		= matcher.start(10) >= 0;
+		isWildCard		= matcher.start(11) >= 0;
 		stay			= false;
 		final boolean	withImport;
-		final int		brandStart	= matcher.start(4);
+		final int		brandStart	= matcher.start(5);
 		{	// import部
 			final int	importEnd	= matcher.end(1);
 			withImport	= importEnd >= 0;
@@ -99,8 +109,9 @@ public class Converter {
 					}
 				}
 				newImport.append(oldImport, lastEnd, pkgEnd);
-				// パッケージの後ろにクラス名を結合する場合のみ、ドットを補う
-				if (brandStart >= 0) newImport.append('.');
+				// パッケージの後ろに付いているセパレーターを引き継ぐ
+				final int	separator	= matcher.start(4);
+				if (separator >= 0) newImport.append(oldImport.charAt(separator));
 			}
 		}
 
@@ -108,25 +119,25 @@ public class Converter {
 		// group(4) が有効であれば、そこから後ろにクラス名のコンポーネントが存在します
 		RENAME: {
 			if (brandStart >= 0) {
-				final int	suffixStart	= matcher.start(8);
+				final int	suffixStart	= matcher.start(9);
 				if (suffixStart >= 0) { // Interface, Listener
 					newImport.append('I');
 				}
 
 				// 内側のgroup(5)が有効＝"Kettle" が確定
-				if (matcher.start(5) >= 0) {
+				if (matcher.start(6) >= 0) {
 					newImport.append("Hop");
 				} else { // Kettle以外のプレフィックス(Base等)はそのまま流用
-					newImport.append(oldImport, brandStart, matcher.end(4));
+					newImport.append(oldImport, brandStart, matcher.end(5));
 				}
 				{
 					// group(6): 旧ドメイン名 (Job / JobEntry / Step / Trans)
-					final int	mainStart	= matcher.start(6);
+					final int	mainStart	= matcher.start(7);
 					if (mainStart > 0) {
 						switch (oldImport.charAt(mainStart)) {
 							case 'J':
 								// Job → Workflow, JobEntry → Action
-								newImport.append(mainStart + 3 < matcher.end(6) ? "Action" : "Workflow");
+								newImport.append(mainStart + 3 < matcher.end(7) ? "Action" : "Workflow");
 								break;
 							case 'S':
 								// Step → Transform
@@ -147,26 +158,26 @@ public class Converter {
 						}
 					}
 				}
-				{	// group(7): 付属品(Meta等)
-					final int	optionalStart	= matcher.start(7);
+				{	// group(8): 付属品(Meta等)
+					final int	optionalStart	= matcher.start(8);
 					if (optionalStart >= 0) {
-						newImport.append(oldImport, optionalStart, matcher.end(7));
+						newImport.append(oldImport, optionalStart, matcher.end(8));
 					}
 				}
 				if (suffixStart >= 0) {
-					// group(8): Listener / RowMeta
+					// group(9): Listener / RowMeta
 					switch (oldImport.charAt(suffixStart)) {
 						case 'I':	break;
 						case 'V':
 							newImport.append("Variables");
 							break;
 						default:
-							newImport.append(oldImport, suffixStart, matcher.end(8));
+							newImport.append(oldImport, suffixStart, matcher.end(9));
 					}
 				}
-				{	// group(9): InnerClass / Constant
-					final int	extraStart	= matcher.start(9)
-							,	extraEnd	= matcher.end(9);
+				{	// group(10): InnerClass / Constant
+					final int	extraStart	= matcher.start(10)
+							,	extraEnd	= matcher.end(10);
 					if (extraStart < extraEnd) {
 						newImport.append(oldImport, extraStart, extraEnd);
 					}
@@ -197,6 +208,8 @@ public class Converter {
 			newImport.append(';');
 		}
 	}
+	/** 古い末端名
+	 * {@link #oldEnd}が決まるまでは呼び出さない */
 	@NotNull
 	public String getOldName() {
 		if (oldName == null) {
@@ -204,6 +217,8 @@ public class Converter {
 		}
 		return oldName;
 	}
+	/** 新しい末端名
+	 * {@link #newEnd}が決まるまでは呼び出さない */
 	@NotNull
 	public String getNewName() {
 		if (newName == null) {
@@ -213,6 +228,6 @@ public class Converter {
 	}
 	@Override
 	public String toString() {
-		return newImport.toString();
+		return newImport != null ? newImport.toString() : EMPTY_STRING;
 	}
 }
