@@ -30,6 +30,12 @@ dependencies {
 		testFramework(TestFrameworkType.Platform)
 	}
 }
+tasks {
+	runIde {
+		// 開発環境であることを示すフラグ
+		systemProperty("plugin.dev.mode", "true")
+	}
+}
 tasks.withType<Copy>().configureEach {
 	inputs.property("file.encoding", "UTF-8")
 	filteringCharset = "UTF-8"

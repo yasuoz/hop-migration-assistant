@@ -19,7 +19,7 @@ public class Converter {
 	 */
 	private static final Pattern	HOP_MIGRATION_PATTERN	= Pattern.compile(
 			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho.di((?:\\.[_a-z0-9]+)+))?(?:(?:^|([:.]))((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
-	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:entr(?:ies|y)|job|repository|shared|step|trans)(?=\\.|$)");
+	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:entr(?:ies|y)|job|repository|shared|steps?|trans)(?=\\.|$)");
 	private final String			oldImport;
 	private final StringBuilder		newImport;
 	/** 最後の.位置 */
@@ -89,7 +89,7 @@ public class Converter {
 					if (partStart > lastEnd) {
 						newImport.append(oldImport, lastEnd, partStart);
 					}
-					final int	partEnd	= pkgMatcher.end()
+					final int	partEnd		= pkgMatcher.end()
 							,	partLength	= partEnd - partStart;
 					lastEnd = partEnd;
 					if ("entries".regionMatches(0, oldImport, partStart, partLength)) {
@@ -102,8 +102,9 @@ public class Converter {
 						newImport.append("metadata");
 					} else if ("shared".regionMatches(0, oldImport, partStart, partLength)) {
 						newImport.append("variables");
-					} else if ("step".regionMatches(0, oldImport, partStart, partLength)) {
+					} else if ("step".regionMatches(0, oldImport, partStart, 4)) {
 						newImport.append("transform");
+						if (partLength == 5) newImport.append('s');
 					} else if ("trans".regionMatches(0, oldImport, partStart, partLength)) {
 						newImport.append("pipeline");
 					}

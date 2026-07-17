@@ -9,6 +9,7 @@ import jp.ac.nitech.cc.hop.assistant.service.HopProjectSettingsService;
 import org.jetbrains.annotations.NotNull;
 
 public class HopImportInspection extends AbstractBaseJavaLocalInspectionTool {
+	private static final boolean	IS_DEV_MODE	= "true".equals(System.getProperty("plugin.dev.mode"));
 	@NotNull
 	@Override
 	public PsiElementVisitor buildVisitor(@NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
@@ -18,6 +19,7 @@ public class HopImportInspection extends AbstractBaseJavaLocalInspectionTool {
 		return new Migrator(holder);
 	}
 	public static boolean emptyHopLibrary(final @NotNull ProblemsHolder holder) {
+		if (IS_DEV_MODE) return false;
 		final var	settings	= holder.getProject().getService(HopProjectSettingsService.class);
 		return settings == null || !settings.getHasHopLibrary();
 	}

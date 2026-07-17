@@ -1,12 +1,16 @@
 package jp.ac.nitech.cc.hop.assistant.imports;
 
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.Nullable;
+import s.Q.P;
 
 import java.util.*;
 import java.util.function.Function;
 
 import static jp.ac.nitech.cc.hop.assistant.imports.Converter.EMPTY_STRING;
+import static jp.ac.nitech.cc.hop.assistant.imports.QuickFixImport.DUMMY_JAVA;
 
 /** クラスフィールドを分ける */
 public class SplitField {
@@ -203,7 +207,8 @@ public class SplitField {
 			}
 			return null;
 		}
-		public PsiField simplify(final PsiElementFactory elementFactory, final PsiParserFacade parserFacade) {
+		public PsiField simplify(final PsiFileFactory fileFactory, final PsiElementFactory elementFactory, final PsiParserFacade parserFacade) {
+			// TODO 末尾に「;;」というようにセミコロンが複数生成されることがある(デバッグ環境では再現できず)
 			if (getField() == null) return null;
 			if (isFirstField(field) && isLastField(field)) {
 				return field;
@@ -216,22 +221,60 @@ public class SplitField {
 				if (next != null) {
 					parent.aClass.deleteChildRange(old, next.getField().getPrevSibling());
 					final var		nextOld	= next.field;
-					if (!isFirstField(nextOld)) {
+					RIGHT: if (!isFirstField(nextOld)) {
+						// 宣言部分がないので追加する
 						final boolean	nextIsLast	= isLastField(nextOld);
 						next.field	= (PsiField)parent.aClass.addBefore(elementFactory.createFieldFromText(parent.toString(nextOld, nextIsLast), parent.aClass), nextOld);
+						if (nextIsLast) {
+							for (PsiElement follows = nextOld;;) {
+								final PsiElement	nextFollows	= follows.getNextSibling();
+								if (nextFollows instanceof PsiWhiteSpace) {
+									follows	= nextFollows;
+									continue;
+								} else if (nextFollows instanceof PsiJavaToken token && token.getTokenType() == JavaTokenType.SEMICOLON) {
+									parent.aClass.deleteChildRange(nextOld, nextFollows);
+									break RIGHT;
+								}
+								break;
+							}
+						} else {
+							for (PsiElement follows = nextOld;;) {
+								final PsiElement	nextFollows	= follows.getNextSibling();
+								if (nextFollows instanceof PsiWhiteSpace) {
+									follows	= nextFollows;
+									continue;
+								} else if (nextFollows instanceof PsiJavaToken token && token.getTokenType() == JavaTokenType.COMMA) {
+									// コンマが見つかった
+									parent.aClass.deleteChildRange(nextOld, follows);
+									break RIGHT;
+								}
+								break;
+							}
+							// コンマが見つからなかった
+							final var comma = elementFactory.createExpressionFromText(",", nextOld);
+						}
 						nextOld.delete();
-
 					}
 				} else {
 					old.delete();
 				}
 			}
-			{	// 前側の処理
+			LEFT: {	// 前側の処理
 				final var	prev	= getPrevious();
 				if (prev != null) {
 					final var	prevOld	= prev.getField();
 					if (!isLastField(prevOld)) {
-						prev.field	= (PsiField)parent.aClass.addBefore(elementFactory.createFieldFromText(prevOld.getText() + ';', parent.aClass), prevOld);
+						final PsiField	willAdd;
+						if (isFirstField(prevOld)) {
+							willAdd	= elementFactory.createFieldFromText(prevOld.getText() + ';', parent.aClass);
+						} else {
+							final PsiFile	dummyFile	= fileFactory
+									.createFileFromText(DUMMY_JAVA, JavaLanguage.INSTANCE, "var a," + prevOld.getText() + ';', false, false);
+							final var		fields		= new ArrayList<>(PsiTreeUtil.findChildrenOfType(dummyFile, PsiField.class));
+							if (fields.isEmpty()) break LEFT;
+							willAdd	= fields.getLast();
+						}
+						prev.field	= (PsiField)parent.aClass.addBefore(willAdd, prevOld);
 						parent.aClass.addBefore(parserFacade.createWhiteSpaceFromText(parent.indent), prevOld);
 						parent.aClass.deleteChildRange(prevOld, getField().getPrevSibling());
 					}
