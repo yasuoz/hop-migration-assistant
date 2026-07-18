@@ -18,8 +18,9 @@ public class Converter {
 	 * JobEntry	→ Action<br/>
 	 */
 	private static final Pattern	HOP_MIGRATION_PATTERN	= Pattern.compile(
-			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho.di((?:\\.[_a-z0-9]+)+))?(?:(?:^|([:.]))((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
-	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:entr(?:ies|y)|job|repository|shared|steps?|trans)(?=\\.|$)");
+			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho((?:\\.[_a-z0-9]+)+))?(?:(?:^|([:.]))((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
+	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:di|e(?:ntr(?:ies|y)|rrorhandling)|job|repository|shared|steps?|trans)(?=\\.|$)");
+	private static final String		ERROR_HANDLING			= "errorhandling";
 	private final String			oldImport;
 	private final StringBuilder		newImport;
 	/** 最後の.位置 */
@@ -79,7 +80,7 @@ public class Converter {
 			final int	pkgStart	= matcher.start(3);
 			// パッケージ部分の変換 (FQNまたはパッケージ単体の場合のみ処理)
 			if (pkgStart >= 0) {
-				newImport.append("org.apache.hop");
+				newImport.append("org.apache");
 
 				final int	pkgEnd		= matcher.end(3);
 				final var	pkgMatcher	= PACKAGE_PATTERN.matcher(oldImport).region(pkgStart, pkgEnd);
@@ -92,10 +93,14 @@ public class Converter {
 					final int	partEnd		= pkgMatcher.end()
 							,	partLength	= partEnd - partStart;
 					lastEnd = partEnd;
-					if ("entries".regionMatches(0, oldImport, partStart, partLength)) {
+					if ("di".regionMatches(0, oldImport, partStart, partLength)) {
+						newImport.append("hop");
+					} else if ("entries".regionMatches(0, oldImport, partStart, partLength)) {
 						newImport.append("actions");
 					} else if ("entry".regionMatches(0, oldImport, partStart, partLength)) {
 						newImport.append("action");
+					} else if (ERROR_HANDLING.regionMatches(0, oldImport, partStart, partLength)) {
+						newImport.append(oldImport.indexOf("Stream", pkgEnd) >= 0 ? "stream" : ERROR_HANDLING);
 					} else if ("job".regionMatches(0, oldImport, partStart, partLength)) {
 						newImport.append("workflow");
 					} else if ("repository".regionMatches(0, oldImport, partStart, partLength)) {

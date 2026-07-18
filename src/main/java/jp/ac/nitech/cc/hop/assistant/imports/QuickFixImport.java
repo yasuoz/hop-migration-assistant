@@ -1,18 +1,13 @@
 package jp.ac.nitech.cc.hop.assistant.imports;
 
 import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
-import com.intellij.lang.java.JavaLanguage;
-import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
-import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.impl.JavaConstantExpressionEvaluator;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.ThrowableRunnable;
 import jp.ac.nitech.cc.hop.assistant.I18n;
+import jp.ac.nitech.cc.hop.assistant.edit.EditList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -30,14 +25,14 @@ import static jp.ac.nitech.cc.hop.assistant.imports.Converter.EMPTY_STRING;
 public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement {
 	private static final com.intellij.openapi.diagnostic.Logger LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(QuickFixImport.class);
 
-	private static final Pattern	PAT_CONSTS		= Pattern.compile("(?:^|\\bConst\\.)(?:FILE_EXTENSION|INTERNAL_VARIABLE|STRING)_(JOB|TRANSF(?:ORMATION)?)(?=(?:_[A-Z]+)+$)")
+	private static final Pattern	PAT_ANNOTATION	= Pattern.compile("(?:org\\.(?:pentaho\\.di|apache\\.hop)\\.core\\.annotations\\.)?(?:Action|JobEntry|Step|Transform)")
+			,						PAT_CONSTS		= Pattern.compile("(?:^|\\bConst\\.)(?:FILE_EXTENSION|INTERNAL_VARIABLE|STRING)_(JOB|TRANSF(?:ORMATION)?)(?=(?:_[A-Z]+)+$)")
 			,						PAT_LOAD_XML	= Pattern.compile("^loadX[Mm][Ll]\\w{0,5}$")
 			,						PAT_META_METHOD	= Pattern.compile("^((?:create|get|is|reset|se(?:archInfoAndTarget|t))\\w{0,5})(?:Step|Trans)(?=(?:Data|(?:I[Oo])?Meta(?:InjectionInterface)?)?\\w?$)")
 			,						PAT_VARIABLES	= Pattern.compile("\\b(?:trans|job|step)(Meta\\b)");
-	public static final String		DUMMY_JAVA		= "Dummy.java";
 	private static final String		CATEGORY_ATTR	= "categoryDescription"
 			,						I18N_PREFIX		= "i18n:"
-			,						INDENT_TEXT		= "\n\t\t"
+			,						INDENT_TEXT		= "\n\t"
 			,						META_ANNOTATION	= "@HopMetadataProperty"
 			,						META_PROPERTY	= "org.apache.hop.metadata.api.HopMetadataProperty"
 			,						PIPELINE		= "Pipeline"
@@ -67,44 +62,33 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 			final @NotNull PsiElement	startElement,
 			final @NotNull PsiElement	endElement
 	) {
-		if (!(file instanceof final PsiJavaFile original)) return;
-		final PsiJavaFile	javaFile	= (PsiJavaFile) PsiFileFactory.getInstance(project)
-				.createFileFromText(
-						original.getName(),
-						JavaLanguage.INSTANCE,
-						original.getText(),
-						false, // イベントを発生させず完全に隔離する
-						false
-				);
-		final var	importList	= javaFile.getImportList();
+		if (!(file instanceof final PsiJavaFile javaFile)) return;
+		final var importList = javaFile.getImportList();
 		if (importList == null) return;
+		final EditList reserves = new EditList(javaFile);
 
-		final PsiImportStatementBase[]			allImports		= importList.getAllImportStatements();
+		final PsiImportStatementBase[] allImports = importList.getAllImportStatements();
 		final List<PsiJavaCodeReferenceElement> references;
-		final ReplaceAll						replacer		= new ReplaceAll(project, original, javaFile);
-		final PsiElementFactory					elementFactory	= JavaPsiFacade.getInstance(project).getElementFactory();
-		final PsiFileFactory					fileFactory		= PsiFileFactory.getInstance(project);
 		{
 			// ファイル内のすべてのコード参照(型宣言、new、キャスト等)を全取得
-			final var	javaList		= PsiTreeUtil.findChildrenOfType(javaFile, PsiJavaCodeReferenceElement.class);
-			final var	constMatcher	= PAT_CONSTS.matcher(INDENT_TEXT);
-			final var	replaceList		= new ArrayList<ReplaceSet>();
-			references	= new LinkedList<>();
+			final var javaList = PsiTreeUtil.findChildrenOfType(javaFile, PsiJavaCodeReferenceElement.class);
+			final var constMatcher = PAT_CONSTS.matcher(EMPTY_STRING);
+			references = new LinkedList<>();
 			for (final PsiJavaCodeReferenceElement ref : javaList) {
 				if (PsiTreeUtil.getParentOfType(ref, PsiImportStatementBase.class) != null) continue;
-				final String	fqn1	= ref.getText();
+				final String fqn1 = ref.getText();
 				if (constMatcher.reset(fqn1).find()) {
 					if (ref.resolve() != null) continue;
-					final boolean		isTrans;
-					final StringBuilder	buf		= new StringBuilder(fqn1.length() + 20);
+					final boolean isTrans;
+					final StringBuilder buf = new StringBuilder(fqn1.length() + 20);
 					{
-						final int	start	= constMatcher.start(1);
-						isTrans				= fqn1.charAt(start) == 'T';
+						final int start = constMatcher.start(1);
+						isTrans = fqn1.charAt(start) == 'T';
 						buf.append(fqn1, 0, start).append(isTrans ? "PIPELINE" : "WORKFLOW");
 					}
-					final int	from	= constMatcher.end(1);
-					replaceList.add(new ReplaceSet(ref,
-							elementFactory.createExpressionFromText(buf.append(fqn1, from, fqn1.length()).toString(), ref.getParent())));
+					final int from = constMatcher.end(1);
+					// PentahoのConst系を置換
+					reserves.replace(ref, buf.append(fqn1, from, fqn1.length()).toString());
 					continue;
 				} else if (ref.resolve() != null) continue;
 				if (ref.getQualifier() != null) {
@@ -115,21 +99,19 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 					// 例: "org.pentaho.di...RowMetaInterface.static_method().getParentStepMeta"
 					// -----------------------------------------------------------------
 					// 右から左(子・クオリファイア方向)へ芋づる式に遡る
-					//LOGGER.info("==右端: " + ref.getText() + "	- " + ref.getClass().getCanonicalName());
-					for (PsiJavaCodeReferenceElement current = ref;;) {
-						final String	fqn2	= current.getText();
+					// LOGGER.info("==右端: " + ref.getText() + "	- " + ref.getClass().getCanonicalName());
+					for (PsiJavaCodeReferenceElement current = ref; ; ) {
+						final String fqn2 = current.getText();
 						if (fqn2.indexOf('(') < 0 && isUpper(current.getReferenceName())) {
 							final var convert = Converter.from(fqn2);
 							if (!convert.stay) {
-								final PsiFile	dummyFile = fileFactory
-										.createFileFromText(DUMMY_JAVA, JavaLanguage.INSTANCE, convert.toString(), false, false);
-								replacer.replace(current, PsiTreeUtil.findChildOfType(dummyFile, PsiJavaCodeReferenceElement.class));
+								reserves.replace(current, convert.toString());
 							}
 							break;
 						}
 						// さらに左(子)へ移動
 						if (current.getQualifier() instanceof PsiJavaCodeReferenceElement childRef) {
-							current	= childRef;
+							current = childRef;
 						} else {
 							break;
 						}
@@ -141,76 +123,65 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 				if (!"Const".equals(ref.getReferenceName()) && ref.resolve() != null) continue;
 				references.add(ref);
 			}
-			for (final ReplaceSet set : replaceList) {
-				set.from.replace(set.to);
-			}
-			if (allImports.length == 0 && references.isEmpty()) return;
+			//if (allImports.length == 0 && references.isEmpty()) return;
 		}
 
-		final var	parserFacade	= PsiParserFacade.getInstance(project);
-		// PSI要素から「生テキスト」を引っこ抜き、Converterに丸投げして自律判定させる
+		//final var	parserFacade	= PsiParserFacade.getInstance(project);
 		for (final PsiImportStatementBase imp : allImports) {
 			// エディタ上に実際に書かれている「import static ... ;」の生テキストを最速取得
-			final String	rawImport	= imp.getText();
-			final var		converter	= Converter.from(rawImport);
+			final String rawImport = imp.getText();
+			final var converter = Converter.from(rawImport);
 			// 変換対象外
 			if (converter.stay) continue;
-			final String	newFqn		= converter.toString();
+			final String newFqn = converter.toString();
 			if (converter.renamed) {
 				// 古いShortNameと新しいShortNameを特定する
-				final String	oldShortName	= converter.getOldName();
-				final String	newShortName	= converter.getNewName();
+				final String oldShortName = converter.getOldName();
+				final String newShortName = converter.getNewName();
 				// 本文中のShortNameをセットで置き換え
-				final Iterator<PsiJavaCodeReferenceElement> it	= references.iterator();
+				final Iterator<PsiJavaCodeReferenceElement> it = references.iterator();
 				while (it.hasNext()) {
-					final PsiJavaCodeReferenceElement	ref	= it.next();
+					final PsiJavaCodeReferenceElement ref = it.next();
 					if (ref.getText().equals(oldShortName)) {
-						replacer.replace(ref, elementFactory.createReferenceFromText(newShortName, null));
+						reserves.replace(ref, newShortName);
 						it.remove();
 					}
 				}
 			}
-			{	// クラスが実在していなくても、import構文チェックだけで置き換えるための方法
-				final var	dummyFile	= (PsiJavaFile) fileFactory.createFileFromText(DUMMY_JAVA, JavaLanguage.INSTANCE, newFqn);
-				final var	imports		= dummyFile.getImportList();
-				if (imports != null) {
-					replacer.replace(imp, imports.getAllImportStatements()[0]);
-				}
-			}
+			reserves.replace(imp, newFqn);
 		}
 		// =================================================================
 		// Hop化されたアノテーション(Transform / Action)の形式を整える
 		// =================================================================
-		for (final PsiAnnotation annotation : PsiTreeUtil.findChildrenOfType(javaFile, PsiAnnotation.class)) {
-			if (!(annotation.getParent() instanceof final PsiModifierList owner) || !(owner.getParent() instanceof PsiClass)) {
-				continue;
-			}
-			final String	annoName	= annotation.getQualifiedName();
-			if (!(	"Action".equals(annoName) ||	TRANSFORM.equals(annoName) ||
-					"org.apache.hop.core.annotations.Action".equals(annoName) ||
-					"org.apache.hop.core.annotations.Transform".equals(annoName))) {
-				// 対象外のアノテーションはスルー
-				continue;
-			}
-			// categoryDescription属性を取得
-			final var	categoryAttr	= annotation.findDeclaredAttributeValue(CATEGORY_ATTR);
-
-			// 属性が存在し、かつダブルクォーテーションで囲まれた文字列リテラルである場合
-			if (categoryAttr instanceof final PsiLiteralExpression literal) {
-				final String	oldCategoryValue	= (String) literal.getValue(); // クォーテーションなしの生文字列
-
-				if (oldCategoryValue != null && oldCategoryValue.startsWith(I18N_PREFIX)) {
-					final StringBuilder	buf	= new StringBuilder().append('"').append(I18N_PREFIX);
-					// 新しい文字列リテラル要素（例: "i18n:org.apache.hop..."）に変換
-					final var	convert	= Converter.from(buf, oldCategoryValue, I18N_PREFIX.length(), oldCategoryValue.length());
-					if (convert.stay) break;
-					// クォーテーションを戻すためにダブルクォーテーションで挟む
-					buf.append('"');
-					final PsiAnnotationMemberValue	newLiteral	= elementFactory.createExpressionFromText(convert.toString(), null);
-					annotation.setDeclaredAttributeValue(CATEGORY_ATTR, newLiteral);
+		{
+			final Matcher	matcher	= PAT_ANNOTATION.matcher(EMPTY_STRING);
+			for (final PsiAnnotation annotation : PsiTreeUtil.findChildrenOfType(javaFile, PsiAnnotation.class)) {
+				if (!(annotation.getParent() instanceof final PsiModifierList owner) || !(owner.getParent() instanceof PsiClass)) {
+					continue;
 				}
+				final String	annoName	= annotation.getQualifiedName();
+				if (!matcher.reset(annoName).matches()) {
+					// 対象外のアノテーションはスルー
+					continue;
+				}
+				// categoryDescription属性を取得
+				final var	categoryAttr	= annotation.findDeclaredAttributeValue(CATEGORY_ATTR);
+
+				// 属性が存在し、かつダブルクォーテーションで囲まれた文字列リテラルである場合
+				if (categoryAttr instanceof final PsiLiteralExpression literal) {
+					final String	oldCategoryValue	= (String) literal.getValue(); // クォーテーションなしの生文字列
+
+					if (oldCategoryValue != null && oldCategoryValue.startsWith(I18N_PREFIX)) {
+						final StringBuilder	buf	= new StringBuilder().append('"').append(I18N_PREFIX);
+						// 新しい文字列リテラル要素（例: "i18n:org.apache.hop..."）に変換
+						final var	convert	= Converter.from(buf, oldCategoryValue, I18N_PREFIX.length(), oldCategoryValue.length());
+						if (convert.stay) break;
+						// クォーテーションを戻すためにダブルクォーテーションで挟む
+						reserves.replace(literal, buf.append('"').toString());
+					}
+				}
+				break;
 			}
-			break;
 		}
 		final var methodCalls = PsiTreeUtil.findChildrenOfType(javaFile, PsiMethodCallExpression.class);
 		// =================================================================
@@ -247,7 +218,7 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 						if (newName == null) continue;
 					}
 				}
-				nameElement.replace(elementFactory.createIdentifier(newName));
+				reserves.replace(nameElement, newName);
 			}
 		}
 		// =================================================================
@@ -279,49 +250,17 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 									result	= "false";
 								} else break ERROR;
 								if (varMatcher.reset(test).find()) {
-									replaceVarMeta(buf.append("var a=/* FIXME	"), varMatcher, test, type);
-									buf.append('	').append(errMsg).append(" */ ").append(result).append(";");
+									replaceVarMeta(buf.append("/* FIXME	"), varMatcher, test, type);
+									buf.append('	').append(errMsg).append(" */").append(result);
 								}
-								final PsiFile	dummyFile	= fileFactory.createFileFromText(
-										DUMMY_JAVA,
-										JavaLanguage.INSTANCE,
-										buf.toString(),
-										false,
-										false
-								);
-								// PsiFieldとして作成されている。
-								final PsiVariable	variableNode	= PsiTreeUtil.findChildOfType(dummyFile, PsiVariable.class);
-								if (variableNode != null) {
-									// 【分離抽出】Javadocコメントと false(式)を個別に引っこ抜く
-									final PsiComment	javaComment		= PsiTreeUtil.getChildOfType(variableNode, PsiComment.class);
-									final PsiExpression	newInitializerExpr	= variableNode.getInitializer();
-									if (newInitializerExpr != null && javaComment != null) {
-										try {
-											final PsiStatement	parentStatement	= PsiTreeUtil.getParentOfType(targetExpr, PsiStatement.class);
-											if (parentStatement != null && parentStatement.getParent() != null) {
-												final PsiElement	statementParent	= parentStatement.getParent();
-												final String		indentText		= getIndentSpace(parentStatement);
-												// 親ステートメント(行)の直前に、メッセージ付きのJavadocコメントを挿入
-												statementParent.addBefore(javaComment, parentStatement);
-												// コメントの直後に空白行を挟む
-												final PsiElement whitespace = parserFacade.createWhiteSpaceFromText(indentText);
-												statementParent.addBefore(whitespace, parentStatement);
-											}
-											replacer.replace(targetExpr, newInitializerExpr);
-										} catch(final Throwable ex)	{
-											LOGGER.error("Error", ex);
-										}
-									}
-								}
+								reserves.replace(targetExpr, buf.toString());
 								continue;
 							}
 							final String	originalExprText	= baseExpr.getText();
 							// 通常の置き換え
 							replaceVarMeta(buf, varMatcher, originalExprText, type);
-							final PsiExpression	newMethodExpr	= elementFactory.createExpressionFromText(buf.toString(), baseExpr.getParent());
-
 							// 式ノード全体(baseExpr)を丸ごと置換
-							baseExpr.replace(newMethodExpr);
+							reserves.replace(baseExpr, buf.toString());
 							continue;
 						}
 					}
@@ -343,7 +282,7 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 						continue;
 					}
 				}
-				ref.replace(elementFactory.createReferenceFromText(newName, ref.getParent()));
+				reserves.replace(ref, newName);
 			}
 		}
 		META: {
@@ -382,8 +321,7 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 				}
 				break META;
 			}
-			final HashMap<String, SplitField>	fieldMap		= new HashMap<>();
-			final JavaCodeStyleManager			styleManager	= JavaCodeStyleManager.getInstance(project);
+			final HashMap<String, SplitField>	fieldMap	= new HashMap<>();
 			String	warning	= null;
 			// 代入が発生している現場を探査
 			for (final PsiAssignmentExpression assignment : PsiTreeUtil.findChildrenOfType(loadXmlMethod, PsiAssignmentExpression.class)) {
@@ -434,51 +372,34 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 						fields	= tmp;
 					}
 				}
-				final PsiField	finalField;
 				final String	indentText	= fields.indent;
-				if (fields.isMultiple()) {
-					// 1行に同居して分離していなかったら、個別に分離する
-					finalField	= fields.fields.get(fieldName)
-							.simplify(fileFactory, elementFactory, parserFacade);
-				} else {
-					finalField	= targetField;
-				}
+				final var		finalDatum	= fields.fields.get(fieldName);
+				final var		finalField	= finalDatum.getField();
 
 				// =================================================================
 				// 【アノテーション調査と付与】
 				// =================================================================
-				if (finalField != null && finalField.getModifierList() != null) {
+				if (finalDatum.isStay() && finalField != null && finalField.getModifierList() != null) {
 					final PsiModifierList	modifierList	= finalField.getModifierList();
 					// すでに同じアノテーションがついていないか調査
 					final PsiAnnotation	existingAnno	= modifierList.findAnnotation(META_PROPERTY);
 					if (existingAnno == null) {
 						// ついていなければ、定数付きのアノテーションノードを生成して付与
-						final String	annoText;
-						if (tagValue.equals(fieldName)) {
-							annoText	= META_ANNOTATION;
-						} else {
-							annoText	= META_ANNOTATION + "(key = " + rawTagText + ')';
+						final StringBuilder	buf	= finalDatum.result;
+						buf.append(META_ANNOTATION);
+						if (!tagValue.equals(fieldName)) {
+							buf.append("(key = ").append(rawTagText).append(')');
 						}
-						final var	lastAnno	= modifierList.addBefore(elementFactory.createAnnotationFromText(annoText, finalField),
-										modifierList.getFirstChild());
+						buf.append(indentText);
 						if (isAttribute) {
 							if (warning == null) {
-								warning	= "// FIXME " + I18n.message("quickfix.hop.warn.HopMetadataProperty");
+								warning	= I18n.message("quickfix.hop.warn.HopMetadataProperty");
 							}
-							final PsiComment	warningComment	= elementFactory.createCommentFromText(warning, lastAnno);
-							modifierList.addAfter(warningComment, lastAnno);
-							modifierList.addAfter(parserFacade.createWhiteSpaceFromText(indentText), lastAnno);
+							buf.append("// FIXME ").append(warning);
 						}
-						if (!indentText.isEmpty()) {
-							final var	whiteSpace	= parserFacade.createWhiteSpaceFromText(indentText);
-							// 読みやすさのために、アノテーションの直後に改行を少し挟む
-							if (modifierList.getNextSibling() instanceof PsiWhiteSpace oldSpace) {
-								oldSpace.replace(whiteSpace);
-							} else {
-								finalField.addAfter(whiteSpace, modifierList);
-							}
-						}
+						buf.append(indentText);
 					}
+					finalDatum.simplify(reserves);
 				}
 			}
 			{
@@ -487,9 +408,11 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 				// =================================================================
 				final Matcher	matcher	= PAT_META_METHOD.matcher(EMPTY_STRING);
 				for (final PsiMethod method : methods) {
-					final String	newName	= renameMethod(matcher, method.getName());
+					final var		methodId	= method.getNameIdentifier();
+					if (methodId == null) continue;
+					final String	newName		= renameMethod(matcher, methodId.getText());
 					if (newName == null) continue;
-					method.setName(newName);
+					reserves.replace(method.getNameIdentifier(), newName);
 				}
 			}
 			IMPORT: if (requireAnno) {
@@ -507,7 +430,7 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 								sortedImports.add(existing);
 							}
 						}
-						sortedImports.sort(ImportSet::compareTo);
+						Collections.sort(sortedImports);
 					}
 
 					for (final ImportSet existing : sortedImports) {
@@ -517,23 +440,17 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 							break SEARCH;
 						}
 					}
-					elderImport	= null;
+					elderImport	= sortedImports.getLast().importStatement;
 				}
-				if (!(fileFactory.createFileFromText(
-						DUMMY_JAVA, JavaLanguage.INSTANCE, "import " + META_PROPERTY + ';', false, false)
-						instanceof PsiJavaFile dummyFile)) break IMPORT;
-				final PsiImportList	dummyList	= dummyFile.getImportList();
-				if (dummyList == null) break IMPORT;
-				// コンテナの中の最初のインポート文を取得
-				final var	newImport = PsiTreeUtil.getChildOfType(dummyList, PsiImportStatement.class);
-				if (newImport == null) break IMPORT;
-				final var	insertedImport	= elderImport != null ? importList.addBefore(newImport, elderImport) : importList.add(newImport);
-				final var	newLine			= parserFacade.createWhiteSpaceFromText("\n");
-				importList.addBefore(newLine, insertedImport);
+				reserves.insert(elderImport.getTextRange().getStartOffset(),"import ", META_PROPERTY, ";\n");
+			}
+			// 分割で影響を受けた残りのフィールドの変更を反映
+			for (final SplitField field : fieldMap.values()) {
+				field.fix(reserves);
 			}
 		}
 		// 蓄積した変更を一挙に実行
-		replacer.commit();
+		reserves.commit();
 	}
 
 	@Nullable
@@ -623,45 +540,12 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 		return !isEmpty(str) && Character.isUpperCase(str.charAt(0));
 	}
 
-	private static class ReplaceAll implements ThrowableRunnable<IncorrectOperationException> {
-		private final @NotNull Project		project;
-		private final Document				document;
-		private final PsiJavaFile			javaFile;
-		private boolean						stay	= true;
-		private ReplaceAll(final @NotNull Project project, final PsiJavaFile original, final PsiJavaFile javaFile) {
-			this.project	= project;
-			this.javaFile	= javaFile;
-			document		= PsiDocumentManager.getInstance(project).getDocument(original);
-		}
-
-		private void commit() throws IncorrectOperationException {
-			if (document == null || stay) return;
-			WriteCommandAction.writeCommandAction(project, javaFile)
-					.withName("Replace Multiple Imports").run(this);
-		}
-		private PsiElement replace(final PsiElement from, final PsiElement to) {
-			if (to == null) return null;
-			stay	= false;
-			return from.replace(to);
-		}
-		@Override
-		public void run() throws IncorrectOperationException {
-			document.setText(javaFile.getText());
-		}
-	}
-	private record ReplaceSet(PsiElement from, PsiElement to) {}
-	private static class ImportSet implements Comparable<ImportSet> {
-		@NotNull
-		final String				fqn;
-		final PsiImportStatement	importStatement;
+	private record ImportSet(@NotNull String fqn, PsiImportStatement importStatement) implements Comparable<ImportSet> {
 		@Nullable
 		private static ImportSet get(final PsiImportStatement importStatement) {
-			final String	fqn	= importStatement.getQualifiedName();
-			return fqn != null ?  new ImportSet(fqn, importStatement) : null;
-		}
-		private ImportSet(@NotNull final String fqn, final PsiImportStatement importStatement) {
-			this.fqn				= fqn;
-			this.importStatement	= importStatement;
+			final String	fqn		= importStatement.getQualifiedName();
+			final var		convert	= Converter.from(fqn);
+			return fqn != null ? new ImportSet(convert.stay ? fqn : convert.toString(), importStatement) : null;
 		}
 		public String toString() {
 			return fqn;

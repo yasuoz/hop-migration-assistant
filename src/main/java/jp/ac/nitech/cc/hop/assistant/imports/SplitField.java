@@ -1,16 +1,16 @@
 package jp.ac.nitech.cc.hop.assistant.imports;
 
-import com.intellij.lang.java.JavaLanguage;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiTreeUtil;
+import jp.ac.nitech.cc.hop.assistant.edit.EditList;
 import org.jetbrains.annotations.Nullable;
-import s.Q.P;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.function.Function;
 
 import static jp.ac.nitech.cc.hop.assistant.imports.Converter.EMPTY_STRING;
-import static jp.ac.nitech.cc.hop.assistant.imports.QuickFixImport.DUMMY_JAVA;
 
 /** クラスフィールドを分ける */
 public class SplitField {
@@ -100,6 +100,25 @@ public class SplitField {
 		}
 		definition	= EMPTY_STRING;
 	}
+	public void fix(final EditList reserves) {
+		for(final FieldPair pair : pairList) {
+			// 処理済
+			if (!pair.result.isEmpty()) continue;
+			// 現状維持
+			if (!(pair.startAffected || pair.endAffected)) continue;
+			final var	field	= pair.getField();
+			if (field == null) continue;
+			final StringBuilder	buf	= pair.result;
+			if (pair.startAffected) {
+				buf.append(indent).append(definition);
+			}
+			pair.appendIdentifier(pair.endAffected);
+			if (pair.endAffected) {
+				buf.append(';').append(indent);
+			}
+			reserves.replace(pair.start, field.getTextRange().getEndOffset(), buf.toString());
+		}
+	}
 	/** 隣り合った{@link PsiField}を取得 */
 	private static PsiField getSiblingField(final PsiField field, final boolean forward) {
 		final Function<PsiElement,PsiElement>	next	= forward ? PsiElement::getNextSibling : PsiElement::getPrevSibling;
@@ -145,47 +164,81 @@ public class SplitField {
 				(field.getNextSibling() instanceof final PsiJavaToken nextToken
 				&& nextToken.getTokenType() == JavaTokenType.SEMICOLON);
 	}
-	public boolean isMultiple() {
-		return fields.size() > 1;
-	}
-	/** 特定のフィールドの定義構文を作成 */
-	public String toString(final PsiField field, final boolean isLast) {
-		final StringBuilder	buf	= new StringBuilder();
-		final String		def	= field.getText();
-		final int			end, len	= def.length();
-		switch (def.charAt(len - 1)) {
-			case ',',';':
-				if (isLast) {
-					end	= len - 1;
-					break;
-				}
-			default:
-				end	= len;
-		}
-		buf.append(definition).append(def, field.getNameIdentifier().getStartOffsetInParent(), end);
-		if (isLast) buf.append(';');
-		return buf.toString();
-	}
 	@Override
 	public String toString() {
 		return definition;
 	}
 	public static class FieldPair {
-		public final SplitField	parent;
-		public final String		name;
-		private final int		index;
+		public final SplitField		parent;
+		public final String			name;
+		/** 中身が空っぽでない場合に、内容物を書き換える */
+		public final StringBuilder	result	= new StringBuilder();
+		/** {@link #pairList}での位置 */
+		private final int			index;
+		/** {@link PsiField}の冒頭部から、末尾コンマやコロン+whitespaceまでの間 */
+		private final int			start, end;
 		/** 分岐処理を経るとinvalidになるので注意 */
-		private PsiField		field;
+		private PsiField			field;
+		/** 前が切られた */
+		private boolean				startAffected	= false;
+		/** 後ろが切られた */
+		private boolean				endAffected		= false;
 		private FieldPair(final SplitField parent, final PsiField field, final int index) {
 			this.parent	= parent;
 			this.field	= field;
 			this.name	= field.getName();
 			this.index	= index;
+			this.start	= field.getTextRange().getStartOffset();
+			PsiElement current	= field;
+			for (;;) {
+				final PsiElement	next	= current.getNextSibling();
+				if (next instanceof PsiWhiteSpace) {
+					current	= next;
+				} else if(next instanceof final PsiJavaToken token) {
+					final var	type	= token.getTokenType();
+					if (type == JavaTokenType.COMMA) {
+						current	= next;
+					} else if (type == JavaTokenType.SEMICOLON) {
+						current	= next;
+						break;
+					}
+				} else break;
+			}
+			this.end	= current.getTextRange().getEndOffset();
 		}
+
 		private FieldPair(final FieldPair copy, final int index) {
 			this.parent	= copy.parent;
+			this.field	= copy.field;
 			this.name	= copy.name;
 			this.index	= index;
+			this.start	= copy.start;
+			this.end	= copy.end;
+		}
+		/** 定義構文を追記
+		 * @param trim	末尾の「,;」を削り取る */
+		private void appendIdentifier(final boolean trim) {
+			final PsiField	field	= getField();
+			final String	text	= field.getText();
+			final int		start	= field.getNameIdentifier().getStartOffsetInParent();
+			final int		max		= text.length();
+			if (trim) {
+				for (int i = max; i > start;) {
+					final int	j	= i - 1;
+					final char	c	= text.charAt(j);
+					if (!Character.isWhitespace(c)) {
+						switch (c) {
+							case ',',';':
+								break;
+							default:
+								result.append(text, start, i);
+								return;
+						}
+					}
+					i	= j;
+				}
+			}
+			result.append(text, start, max);
 		}
 		/** 念のため、連続する最初のアクセスではこのメソッドを呼び出してください<br/>
 		 * {@link #field}が上書きされます */
@@ -207,80 +260,24 @@ public class SplitField {
 			}
 			return null;
 		}
-		public PsiField simplify(final PsiFileFactory fileFactory, final PsiElementFactory elementFactory, final PsiParserFacade parserFacade) {
-			// TODO 末尾に「;;」というようにセミコロンが複数生成されることがある(デバッグ環境では再現できず)
-			if (getField() == null) return null;
-			if (isFirstField(field) && isLastField(field)) {
-				return field;
-			}
-			{	// 後ろ側の処理
-				final var	old		= field;
-				field	= (PsiField)parent.aClass.addBefore(elementFactory.createFieldFromText(parent.toString(field, true), parent.aClass), old);
-				parent.aClass.addBefore(parserFacade.createWhiteSpaceFromText(parent.indent), old);
-				final var	next	= getNext();
-				if (next != null) {
-					parent.aClass.deleteChildRange(old, next.getField().getPrevSibling());
-					final var		nextOld	= next.field;
-					RIGHT: if (!isFirstField(nextOld)) {
-						// 宣言部分がないので追加する
-						final boolean	nextIsLast	= isLastField(nextOld);
-						next.field	= (PsiField)parent.aClass.addBefore(elementFactory.createFieldFromText(parent.toString(nextOld, nextIsLast), parent.aClass), nextOld);
-						if (nextIsLast) {
-							for (PsiElement follows = nextOld;;) {
-								final PsiElement	nextFollows	= follows.getNextSibling();
-								if (nextFollows instanceof PsiWhiteSpace) {
-									follows	= nextFollows;
-									continue;
-								} else if (nextFollows instanceof PsiJavaToken token && token.getTokenType() == JavaTokenType.SEMICOLON) {
-									parent.aClass.deleteChildRange(nextOld, nextFollows);
-									break RIGHT;
-								}
-								break;
-							}
-						} else {
-							for (PsiElement follows = nextOld;;) {
-								final PsiElement	nextFollows	= follows.getNextSibling();
-								if (nextFollows instanceof PsiWhiteSpace) {
-									follows	= nextFollows;
-									continue;
-								} else if (nextFollows instanceof PsiJavaToken token && token.getTokenType() == JavaTokenType.COMMA) {
-									// コンマが見つかった
-									parent.aClass.deleteChildRange(nextOld, follows);
-									break RIGHT;
-								}
-								break;
-							}
-							// コンマが見つからなかった
-							final var comma = elementFactory.createExpressionFromText(",", nextOld);
-						}
-						nextOld.delete();
-					}
-				} else {
-					old.delete();
+		public boolean isStay() {
+			return result.isEmpty();
+		}
+		public void simplify(final EditList reserves) {
+			if (parent.definition.isEmpty()) {
+				reserves.insert(this.start, result.toString());
+			} else {
+				{
+					final FieldPair	prev	= getPrevious();
+					if (prev != null)	prev.endAffected	= true;
+					final FieldPair	next	= getNext();
+					if (next != null)	next.startAffected	= true;
 				}
+				result.append(parent.definition);
+				appendIdentifier(true);
+				result.append(';').append(parent.indent);
+				reserves.replace(this.start, end, result.toString());
 			}
-			LEFT: {	// 前側の処理
-				final var	prev	= getPrevious();
-				if (prev != null) {
-					final var	prevOld	= prev.getField();
-					if (!isLastField(prevOld)) {
-						final PsiField	willAdd;
-						if (isFirstField(prevOld)) {
-							willAdd	= elementFactory.createFieldFromText(prevOld.getText() + ';', parent.aClass);
-						} else {
-							final PsiFile	dummyFile	= fileFactory
-									.createFileFromText(DUMMY_JAVA, JavaLanguage.INSTANCE, "var a," + prevOld.getText() + ';', false, false);
-							final var		fields		= new ArrayList<>(PsiTreeUtil.findChildrenOfType(dummyFile, PsiField.class));
-							if (fields.isEmpty()) break LEFT;
-							willAdd	= fields.getLast();
-						}
-						prev.field	= (PsiField)parent.aClass.addBefore(willAdd, prevOld);
-						parent.aClass.addBefore(parserFacade.createWhiteSpaceFromText(parent.indent), prevOld);
-						parent.aClass.deleteChildRange(prevOld, getField().getPrevSibling());
-					}
-				}
-			}
-			return field;
 		}
 		public String toString() {
 			return name;

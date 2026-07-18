@@ -42,7 +42,7 @@ public class HopImportInspection extends AbstractBaseJavaLocalInspectionTool {
 			}
 		}
 		private void handleImportCheck(@NotNull final PsiImportStatementBase statement, final String qName) {
-			if (qName != null && qName.startsWith("org.pentaho.di")) {
+			if (qName != null && qName.startsWith("org.pentaho")) {
 				final var	importRef		= statement.getImportReference();
 
 				// 万が一、構文が壊れていて参照が取れなかった場合のみ、安全のために文全体(statement)を対象にする

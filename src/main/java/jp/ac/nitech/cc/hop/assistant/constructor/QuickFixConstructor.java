@@ -3,11 +3,9 @@ package jp.ac.nitech.cc.hop.assistant.constructor;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
 import jp.ac.nitech.cc.hop.assistant.I18n;
 import org.jetbrains.annotations.NotNull;
-
-import static jp.ac.nitech.cc.hop.assistant.constructor.HopConstructorInspection.*;
 
 public class QuickFixConstructor implements LocalQuickFix {
 	@NotNull
