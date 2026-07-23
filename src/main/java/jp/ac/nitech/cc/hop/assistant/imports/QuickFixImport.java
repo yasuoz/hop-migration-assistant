@@ -63,9 +63,10 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 			final @NotNull PsiElement	endElement
 	) {
 		if (!(file instanceof final PsiJavaFile javaFile)) return;
-		final var importList = javaFile.getImportList();
+		final String	fileName	= javaFile.getName();
+		final var		importList	= javaFile.getImportList();
 		if (importList == null) return;
-		final EditList reserves = new EditList(javaFile);
+		final EditList	reserves	= new EditList(javaFile);
 
 		final PsiImportStatementBase[] allImports = importList.getAllImportStatements();
 		final List<PsiJavaCodeReferenceElement> references;
@@ -225,7 +226,7 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 		// 典型的な変換漏れのクラス名、Constクラスの内部レガシー定数
 		// =================================================================
 		{
-			final Matcher	varMatcher		= PAT_VARIABLES.matcher(INDENT_TEXT);
+			final Matcher	varMatcher		= PAT_VARIABLES.matcher(EMPTY_STRING);
 			for (final PsiJavaCodeReferenceElement ref : references) {
 				final String	oldName = ref.getText()
 						,		newName;
@@ -395,9 +396,8 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 							if (warning == null) {
 								warning	= I18n.message("quickfix.hop.warn.HopMetadataProperty");
 							}
-							buf.append("// FIXME ").append(warning);
+							buf.append("// FIXME ").append(warning).append(indentText);
 						}
-						buf.append(indentText);
 					}
 					finalDatum.simplify(reserves);
 				}
@@ -447,6 +447,27 @@ public class QuickFixImport extends LocalQuickFixAndIntentionActionOnPsiElement 
 			// 分割で影響を受けた残りのフィールドの変更を反映
 			for (final SplitField field : fieldMap.values()) {
 				field.fix(reserves);
+			}
+		}
+		if (fileName.endsWith("Dialog.java")) {
+			// =================================================================
+			// 典型的な変換漏れのクラス名、Constクラスの内部レガシー定数
+			// =================================================================
+			for (final PsiJavaCodeReferenceElement ref : references) {
+				final String	oldName = ref.getText()
+						,		newName;
+				switch (oldName) {
+					case "stepname"
+							-> newName	= "transformName";
+					case "wStepname"
+							-> newName	= "wTransformName";
+					case "wOK"
+							-> newName	= "wOk";
+					default -> {
+						continue;
+					}
+				}
+				reserves.replace(ref, newName);
 			}
 		}
 		// 蓄積した変更を一挙に実行

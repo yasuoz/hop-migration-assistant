@@ -19,7 +19,7 @@ public class Converter {
 	 */
 	private static final Pattern	HOP_MIGRATION_PATTERN	= Pattern.compile(
 			"^(?:(\\s*import\\s+(static\\s+)?)?org.pentaho((?:\\.[_a-z0-9]+)+))?(?:(?:^|([:.]))((Kettle)|(?:(?!Job|Row|Step|Trans|V(?:ariable|FS)|XML)[A-Z][a-z0-9]*?)?)(Job(?:Entry)?|Step|Trans|VFS|XML)?((?:(?!Interface|Listener|RowSet|Variable)[A-Z][a-z]*)+?)?(Interface|Listener|RowSet|VariableSpace)?((?:\\.\\w+)*)?)?(\\.\\*)?(?=\\s*;?$)"
-	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:di|e(?:ntr(?:ies|y)|rrorhandling)|job|repository|shared|steps?|trans)(?=\\.|$)");
+	)		,						PACKAGE_PATTERN			= Pattern.compile("(?<=^|\\.)(?:(?:di|e(?:ntr(?:ies|y)|rrorhandling)|job|repository|shared|steps?|trans)(?=\\.|$)|ui\\.(?=(?:pipeline|trans)\\.(?:step|transform)s\\.))");
 	private static final String		ERROR_HANDLING			= "errorhandling";
 	private final String			oldImport;
 	private final StringBuilder		newImport;

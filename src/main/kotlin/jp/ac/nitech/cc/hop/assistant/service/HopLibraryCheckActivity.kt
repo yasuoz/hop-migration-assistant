@@ -5,13 +5,18 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.OrderEnumerator
 import com.intellij.openapi.roots.OrderRootType
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.startup.ProjectActivity
 
 /** クラスパスにHop向けクラスがあるか1度だけ確認 */
 class HopLibraryCheckActivity : ProjectActivity {
 	override suspend fun execute(project: Project) {
-		val hasLibrary	= readAction {
-			var found	= false
+		// プロジェクトのインデックス作成・初期化(Smartモード)が完了するまで安全に待つ
+		DumbService.getInstance(project).waitForSmartMode()
+
+		// ディスパッチャの競合を避けるため、安全な読み込みアクションを実行
+		val hasLibrary = readAction {
+			var found = false
 
 			// プロジェクト全体のライブラリ(Gradleが持ってきたJARなど)を走査
 			OrderEnumerator.orderEntries(project).librariesOnly().forEachLibrary { library ->

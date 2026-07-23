@@ -14,6 +14,7 @@
 				bundle="messages.I18n"
 				enabledByDefault="true"
 				groupPath="Java"
+				fileExtensions="java"
 				groupName="Migration"
 				implementationClass="jp.ac.nitech.cc.hop.assistant.imports.HopImportInspection"
 				key="quickfix.hop.import.migration.name"
@@ -23,12 +24,33 @@
 		<localInspection
 				bundle="messages.I18n"
 				enabledByDefault="true"
+				fileExtensions="java"
 				groupName="Apache Hop"
 				implementationClass="jp.ac.nitech.cc.hop.assistant.constructor.HopConstructorInspection"
 				key="inspection.hop.constructor.display.name"
 				language="JAVA"
 				level="ERROR"
 				shortName="HopConstructor"/>
+		<localInspection
+				displayName="Database second argument inspection"
+				enabledByDefault="true"
+				fileExtensions="java"
+				groupPath="Java"
+				groupName="Probable bugs"
+				implementationClass="jp.ac.nitech.cc.hop.assistant.variables.VariablesInspection"
+				language="JAVA"
+				level="ERROR"
+				shortName="HopVariable"/>
+		<localInspection
+				displayName="Hop Svg inspection"
+				enabledByDefault="false"
+				fileExtensions="svg"
+				groupPath="Apache Hop"
+				groupName="Icons"
+				implementationClass="jp.ac.nitech.cc.hop.assistant.svg.HopSvgFormatInspection"
+				language="XML"
+				level="ERROR"
+				shortName="HopSvgFormat"/>
 		<implicitUsageProvider implementation="jp.ac.nitech.cc.hop.assistant.HopImplicitUsageProvider"/>
 		<projectService serviceImplementation="jp.ac.nitech.cc.hop.assistant.service.HopProjectSettingsService"/>
 		<backgroundPostStartupActivity implementation="jp.ac.nitech.cc.hop.assistant.service.HopLibraryCheckActivity"/>
